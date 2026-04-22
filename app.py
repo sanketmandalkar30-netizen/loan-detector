@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import subprocess, sys
-subprocess.check_call([sys.executable, "-m", "pip", "install", "joblib", "scikit-learn", "plotly", "pandas", "numpy"])
 import joblib
 import os
 import plotly.express as px
