@@ -1,25 +1,36 @@
 import streamlit as st
 import pandas as pd
-import subprocess, sys
 import joblib
 import os
 import plotly.express as px
 
-# --- LOAD THE AI MODEL ---
+# --- SET UP PAGE CONFIG FIRST ---
+st.set_page_config(page_title="AI Loan Predictor", page_icon="🏦", layout="wide")
+
+# --- ROBUST MODEL LOADING ---
 @st.cache_resource
 def load_model():
-    if os.path.exists('loan_model.pkl'):
-        return joblib.load('loan_model.pkl')
+    # This finds the directory where app.py is located
+    base_path = os.path.dirname(__file__)
+    # Joins the directory with the filename
+    model_path = os.path.join(base_path, 'loan_model.pkl')
+    
+    if os.path.exists(model_path):
+        try:
+            return joblib.load(model_path)
+        except Exception as e:
+            st.error(f"Error loading model: {e}")
+            return None
     return None
 
 model = load_model()
 
-# --- WEBSITE SETUP ---
-st.set_page_config(page_title="AI Loan Predictor", page_icon="🏦", layout="wide")
+# --- UI HEADER ---
 st.title("🏦 AI-Powered Loan Predictor")
 
 if model is None:
-    st.error("⚠️ Model not found! Please run 'python train_model.py' first.")
+    st.error("⚠️ 'loan_model.pkl' not found in the repository!")
+    st.info("Make sure you have uploaded the 'loan_model.pkl' file to the same folder as this script on GitHub.")
     st.stop()
 
 st.write("Enter your financial details below to estimate your approval odds.")
@@ -30,12 +41,11 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Financial Details")
-    # Updated to Rupees with realistic defaults and step sizes
     loan_amount = st.number_input("Loan Amount (₹)", min_value=10000, value=2500000, step=100000)
     income = st.number_input("Your Annual Income (₹)", min_value=50000, value=800000, step=50000)
-    co_applicant_income = st.number_input("Co-Applicant Annual Income (₹)", min_value=0, value=0, step=50000, help="Income of anyone else applying with you.")
+    co_applicant_income = st.number_input("Co-Applicant Annual Income (₹)", min_value=0, value=0, step=50000)
     debt = st.number_input("Current Monthly Debt (₹)", min_value=0, value=15000, step=1000)
-    property_value = st.number_input("Total Property Value (₹)", min_value=0, value=0, step=100000, help="Value of homes, land, or vehicles you own (Collateral).")
+    property_value = st.number_input("Total Property Value (₹)", min_value=0, value=0, step=100000)
 
 with col2:
     st.subheader("Personal Details")
@@ -44,11 +54,12 @@ with col2:
 
 st.markdown("---")
 
-# --- PREDICTION AND VISUALS ---
+# --- PREDICTION LOGIC ---
 if st.button("Calculate Approval Odds", type="primary", use_container_width=True):
     
-    # Format inputs exactly as the AI expects them
     emp_map = {"Unemployed": 0, "Salaried": 1, "Self-Employed": 2}
+    
+    # Create DataFrame for prediction
     input_data = pd.DataFrame({
         'loan_amount': [loan_amount],
         'income': [income],
@@ -59,48 +70,41 @@ if st.button("Calculate Approval Odds", type="primary", use_container_width=True
         'employment_status': [emp_map[employment_str]]
     })
     
-    # Ask AI for prediction
     try:
+        # Get probability
         prediction_array = model.predict_proba(input_data)
         approval_prob = int(round(prediction_array[0][1] * 100))
-    except ValueError:
-        st.error("🚨 Error: The AI model is out of date! Please run 'python train_model.py' in your terminal to update it.")
-        st.stop()
-    
-    # --- DISPLAY RESULTS ---
-    res_col1, res_col2 = st.columns(2)
-    
-    with res_col1:
-        st.subheader("AI Prediction")
-        st.metric(label="Probability of Approval", value=f"{approval_prob}%")
-        st.progress(approval_prob / 100.0)
         
-        if approval_prob >= 70:
-            st.success("Great! High chance of approval.")
-        elif approval_prob >= 40:
-            st.warning("Fair odds. Borderline approval.")
-        else:
-            st.error("Low odds. High risk application.")
+        # --- DISPLAY RESULTS ---
+        res_col1, res_col2 = st.columns(2)
+        
+        with res_col1:
+            st.subheader("AI Prediction")
+            st.metric(label="Probability of Approval", value=f"{approval_prob}%")
+            st.progress(approval_prob / 100.0)
             
-        if property_value > loan_amount:
-            st.info("💡 Your property value exceeds the loan amount, which acts as excellent collateral and significantly boosts your odds!")
+            if approval_prob >= 70:
+                st.success("Great! High chance of approval.")
+            elif approval_prob >= 40:
+                st.warning("Fair odds. Borderline approval.")
+            else:
+                st.error("Low odds. High risk application.")
+                
+        with res_col2:
+            st.subheader("Household Financial Health")
+            total_monthly_income = (income + co_applicant_income) / 12
+            remaining_income = max(0, total_monthly_income - debt)
             
-    with res_col2:
-        st.subheader("Household Financial Health")
-        
-        # Calculate combined monthly math for the chart
-        total_annual_income = income + co_applicant_income
-        monthly_income = total_annual_income / 12
-        remaining_income = max(0, monthly_income - debt)
-        
-        # Create an interactive Pie Chart (Updated labels to ₹)
-        chart_data = pd.DataFrame({
-            "Category": ["Monthly Debt", "Remaining Household Income"],
-            "Amount (₹)": [debt, remaining_income]
-        })
-        
-        fig = px.pie(chart_data, values="Amount (₹)", names="Category", 
-                     color="Category", color_discrete_map={"Monthly Debt":"#EF553B", "Remaining Household Income":"#00CC96"},
-                     hole=0.4) 
-        
-        st.plotly_chart(fig, use_container_width=True)
+            chart_data = pd.DataFrame({
+                "Category": ["Monthly Debt", "Remaining Income"],
+                "Amount (₹)": [debt, remaining_income]
+            })
+            
+            fig = px.pie(chart_data, values="Amount (₹)", names="Category", 
+                         color="Category", 
+                         color_discrete_map={"Monthly Debt":"#EF553B", "Remaining Income":"#00CC96"},
+                         hole=0.4) 
+            st.plotly_chart(fig, use_container_width=True)
+            
+    except Exception as e:
+        st.error(f"Prediction Error: {e}")
